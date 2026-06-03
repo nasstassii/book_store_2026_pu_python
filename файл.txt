@@ -1,4 +1,9 @@
 Remove-Item -Recurse -Force .git в главной папке
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install PyQt6 mysql-connector-python pyinstaller Pillow
+pip freeze > requirements.txt
+
 ## Шаг 1. Создание структуры проекта
 
 ```cmd
@@ -219,6 +224,7 @@ SELECT o.order_id, p.product_id,
 FROM orders o
 JOIN products p ON p.article = TRIM(SUBSTRING_INDEX(SUBSTRING_INDEX(REPLACE(o.article_text, ' ', ''), ',', 3), ',', -1))
 WHERE TRIM(o.article_text) <> '';
+
 Шаг 6. Установка Python и зависимостей
 cmd
 cd C:\book_store_2026_pu_python\app
@@ -226,6 +232,7 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install PyQt6 mysql-connector-python pyinstaller Pillow
 pip freeze > requirements.txt
+
 Шаг 7. Модуль подключения к БД (db.py)
 python
 import mysql.connector
