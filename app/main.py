@@ -16,25 +16,36 @@ from PyQt6.QtWidgets import (
 
 from db import get_connection
 
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS 
+    except Exception:
+        base_path = os.path.abspath(".")  
+    return os.path.join(base_path, relative_path)
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-RESOURCES_DIR = os.path.join(os.path.dirname(BASE_DIR), "resources")
+
+if getattr(sys, 'frozen', False):
+    RESOURCES_DIR = resource_path("resources")
+else:
+    RESOURCES_DIR = os.path.join(os.path.dirname(BASE_DIR), "resources")
+
 PHOTOS_DIR = os.path.join(RESOURCES_DIR, "photos")
 ICON_ICO = os.path.join(RESOURCES_DIR, "Icon.ico")
 ICON_PNG = os.path.join(RESOURCES_DIR, "Icon.png")
 PICTURE_PNG = os.path.join(RESOURCES_DIR, "picture.png")
 
-
+# Цвета из руководства по стилю
 COLOR_WHITE = "#FFFFFF"
 COLOR_SECOND = "#ABCFCE"
 COLOR_ACCENT = "#546F94"
-COLOR_DISCOUNT_ROW = "#23E1EF"
-COLOR_ZERO_STOCK = "#808080"
+COLOR_DISCOUNT_ROW = "#23E1EF"  # подсветка при скидке >25%
+COLOR_ZERO_STOCK = "#808080"    # серый при остатке 0
 
 
 @dataclass
 class UserInfo:
-    """Хранит данные о пользователе после входа"""
     user_id: int | None
     full_name: str
     role_name: str
@@ -49,11 +60,9 @@ def show_warn(parent, text):
 
 
 class DataService:
-    """Все методы для работы с БД - статические"""
 
     @staticmethod
     def auth(login: str, password: str):
-        """Проверка логина и пароля, возвращает UserInfo или None"""
         conn = get_connection()
         try:
             cur = conn.cursor(dictionary=True)
@@ -102,7 +111,6 @@ class DataService:
 
     @staticmethod
     def get_supplier_names():
-        """Для выпадающего списка поставщиков"""
         conn = get_connection()
         try:
             cur = conn.cursor()
@@ -123,7 +131,6 @@ class DataService:
 
     @staticmethod
     def get_product_by_id(product_id: int):
-        """Для редактирования - получает один товар по ID"""
         conn = get_connection()
         try:
             cur = conn.cursor(dictionary=True)
@@ -151,10 +158,6 @@ class DataService:
 
     @staticmethod
     def ensure_supplier(conn, name: str):
-        """
-        Если поставщика нет в БД - добавляет, возвращает ID.
-        Нужно чтобы не было ошибки внешнего ключа при сохранении товара.
-        """
         cur = conn.cursor()
         cur.execute("SELECT supplier_id FROM suppliers WHERE name=%s", (name,))
         row = cur.fetchone()
@@ -166,7 +169,6 @@ class DataService:
 
     @staticmethod
     def ensure_manufacturer(conn, name: str):
-        """Аналогично для производителя"""
         cur = conn.cursor()
         cur.execute("SELECT manufacturer_id FROM manufacturers WHERE name=%s", (name,))
         row = cur.fetchone()
@@ -178,7 +180,6 @@ class DataService:
 
     @staticmethod
     def save_product(model: dict):
-        """Универсальное сохранение: INSERT если нет ID, UPDATE если есть"""
         conn = get_connection()
         try:
             supplier_id = DataService.ensure_supplier(conn, model["supplier_name"])
@@ -216,10 +217,8 @@ class DataService:
 
     @staticmethod
     def product_exists_in_orders(product_id: int) -> bool:
-        """
-        Проверяет, есть ли товар в заказах.
-        Если есть - удалять нельзя (задание: товар в заказе удалить нельзя).
-        """
+        """Проверяет, есть ли товар в заказах.
+           Если есть - удалять нельзя по заданию."""
         conn = get_connection()
         try:
             cur = conn.cursor()
@@ -315,10 +314,8 @@ class DataService:
 
     @staticmethod
     def parse_article_pairs(text: str):
-        """
-        Парсит строку из заказа вида "A112T4,2,G843H5,2"
-        Возвращает список пар [(артикул, количество), ...]
-        """
+        """Парсит строку из заказа вида 'A112T4,2,G843H5,2'
+           Возвращает список пар [(артикул, количество), ...]"""
         tokens = [x.strip() for x in (text or "").split(",") if x.strip()]
         if len(tokens) < 2 or len(tokens) % 2 != 0:
             raise ValueError("Артикулы задаются парами: артикул, количество.")
@@ -336,16 +333,15 @@ class DataService:
 
     @staticmethod
     def save_order(model: dict):
-        """
-        Сохраняет заказ.
-        Сначала удаляет старые позиции (при редактировании),
-        потом вставляет новые.
-        """
+        """Сохраняет заказ.
+           Сначала удаляет старые позиции (при редактировании),
+           потом вставляет новые."""
         conn = get_connection()
         try:
             pairs = DataService.parse_article_pairs(model["article_text"])
             cur = conn.cursor()
 
+            # Получаем ID товаров по артикулам
             article_ids = {}
             for article, _ in pairs:
                 cur.execute("SELECT product_id FROM products WHERE article=%s", (article,))
@@ -355,6 +351,7 @@ class DataService:
                 article_ids[article] = row[0]
 
             if model.get("order_id"):
+                # Обновление существующего заказа
                 cur.execute("""
                     UPDATE orders
                     SET article_text=%s, order_date=%s, delivery_date=%s,
@@ -367,6 +364,7 @@ class DataService:
                 order_id = model["order_id"]
                 cur.execute("DELETE FROM order_items WHERE order_id=%s", (order_id,))
             else:
+                # Новый заказ
                 cur.execute("""
                     INSERT INTO orders(
                         order_number, article_text, order_date, delivery_date,
@@ -380,6 +378,7 @@ class DataService:
                 ))
                 order_id = cur.lastrowid
 
+            # Вставляем позиции заказа
             for article, qty in pairs:
                 cur.execute(
                     "INSERT INTO order_items(order_id, product_id, quantity) VALUES(%s,%s,%s)",
@@ -426,7 +425,7 @@ class LoginDialog(QDialog):
 
         self.login_edit = QLineEdit()
         self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password) 
         form.addRow("Логин:", self.login_edit)
         form.addRow("Пароль:", self.password_edit)
         root.addLayout(form)
@@ -484,7 +483,7 @@ class ProductFormDialog(QDialog):
         row = 0
         self.id_label = QLabel("ID товара:")
         self.id_edit = QLineEdit()
-        self.id_edit.setReadOnly(True)
+        self.id_edit.setReadOnly(True) 
         grid.addWidget(self.id_label, row, 0)
         grid.addWidget(self.id_edit, row, 1)
         row += 1
@@ -518,6 +517,7 @@ class ProductFormDialog(QDialog):
             grid.addWidget(widget, row, 1)
             row += 1
 
+        # Блок выбора фото
         photo_row = QHBoxLayout()
         self.photo_label = QLabel()
         self.photo_label.setFixedSize(300, 200)
@@ -548,9 +548,10 @@ class ProductFormDialog(QDialog):
         else:
             self.id_label.hide()
             self.id_edit.hide()
-            self.set_preview(PICTURE_PNG)
+            self.set_preview(PICTURE_PNG)  # картинка-заглушка
 
     def load_lookups(self):
+        """Загрузка выпадающих списков из БД"""
         for x in DataService.get_categories():
             self.category_combo.addItem(x["name"], x["category_id"])
         for x in DataService.get_supplier_names():
@@ -566,6 +567,7 @@ class ProductFormDialog(QDialog):
         return PICTURE_PNG
 
     def load_product(self, product_id: int):
+        """Загрузка данных товара в форму для редактирования"""
         row = DataService.get_product_by_id(product_id)
         if not row:
             show_error(self, "Товар не найден.")
@@ -591,6 +593,7 @@ class ProductFormDialog(QDialog):
         self.set_preview(self.resolve_photo_path(self.old_photo_file))
 
     def set_preview(self, file_path: str):
+        """Отображает фото в метке"""
         pix = QPixmap(file_path)
         if pix.isNull():
             self.photo_label.setText("Нет фото")
@@ -629,7 +632,7 @@ class ProductFormDialog(QDialog):
         description = self.description_edit.toPlainText().strip()
 
         if not article or not name or not supplier or not manufacturer or not unit:
-            show_warn(self, "Заполните обязательные поля: артикул, наименование, производитель, поставщик, единица измерения.")
+            show_warn(self, "Заполните обязательные поля.")
             return
 
         try:
@@ -847,7 +850,7 @@ class OrdersDialog(QDialog):
         self.table.setHorizontalHeaderLabels(
             ["Номер", "Артикул заказа", "Статус", "Пункт выдачи", "Дата заказа", "Дата выдачи"]
         )
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(True)  
         self.table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {COLOR_WHITE};
@@ -937,7 +940,7 @@ class ProductsWindow(QMainWindow):
         super().__init__()
         self.user_data = user_data
         self.products = []
-        self.product_editor_opened = False
+        self.product_editor_opened = False  
 
         self.setWindowTitle("ЧитайГород - Список товаров")
         self.resize(1600, 820)
@@ -950,6 +953,7 @@ class ProductsWindow(QMainWindow):
         self.setCentralWidget(root)
         main = QVBoxLayout(root)
 
+        # Верхняя панель с логотипом
         header = QGridLayout()
         logo = QLabel()
         if os.path.exists(ICON_PNG):
@@ -978,6 +982,7 @@ class ProductsWindow(QMainWindow):
         header.setColumnStretch(1, 1)
         main.addLayout(header)
 
+        # Панель фильтрации (только для менеджера и админа)
         self.filter_wrap = QWidget()
         self.filter_wrap.setStyleSheet(f"background-color: {COLOR_WHITE};")
         filter_layout = QHBoxLayout(self.filter_wrap)
@@ -996,6 +1001,7 @@ class ProductsWindow(QMainWindow):
         filter_layout.addWidget(self.sort_combo)
         main.addWidget(self.filter_wrap)
 
+        # Панель администратора (кнопки CRUD)
         self.admin_wrap = QWidget()
         self.admin_wrap.setStyleSheet(f"background-color: {COLOR_WHITE};")
         admin_layout = QHBoxLayout(self.admin_wrap)
@@ -1011,23 +1017,12 @@ class ProductsWindow(QMainWindow):
         admin_layout.addStretch()
         main.addWidget(self.admin_wrap)
 
+        # Таблица товаров
         self.table = QTableWidget()
         self.table.setColumnCount(12)
         self.table.setHorizontalHeaderLabels(
-            [
-                "Фото",
-                "Артикул",
-                "Наименование",
-                "Категория",
-                "Описание",
-                "Производитель",
-                "Поставщик",
-                "Цена",
-                "Цена со скидкой",
-                "Ед.",
-                "Остаток",
-                "Скидка",
-            ]
+            ["Фото", "Артикул", "Наименование", "Категория", "Описание",
+             "Производитель", "Поставщик", "Цена", "Цена со скидкой", "Ед.", "Остаток", "Скидка"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1047,6 +1042,7 @@ class ProductsWindow(QMainWindow):
         self.table.doubleClicked.connect(self.row_double_click)
         main.addWidget(self.table)
 
+        # Подключаем сигналы
         self.btn_add.clicked.connect(self.add_product)
         self.btn_edit.clicked.connect(self.edit_product)
         self.btn_delete.clicked.connect(self.delete_product)
@@ -1070,10 +1066,11 @@ class ProductsWindow(QMainWindow):
         return self.user_data.role_name in ("Менеджер", "Администратор")
 
     def apply_role_rules(self):
+        """Скрываем/показываем элементы в зависимости от роли"""
         advanced = self.is_manager_or_admin()
-        self.filter_wrap.setVisible(advanced)
-        self.admin_wrap.setVisible(self.is_admin())
-        self.btn_orders.setVisible(advanced)
+        self.filter_wrap.setVisible(advanced)      # фильтры только для менеджера/админа
+        self.admin_wrap.setVisible(self.is_admin()) # кнопки CRUD только для админа
+        self.btn_orders.setVisible(advanced)       # заказы для менеджера/админа
 
     def load_discount_ranges(self):
         self.discount_combo.clear()
@@ -1085,34 +1082,33 @@ class ProductsWindow(QMainWindow):
         self.apply_filters()
 
     def photo_pixmap(self, photo_file: str):
+        """Загружает фото из папки или картинку-заглушку"""
         if photo_file:
             p = os.path.join(PHOTOS_DIR, os.path.basename(photo_file))
             if os.path.exists(p):
                 pix = QPixmap(p)
                 if not pix.isNull():
                     return pix
-        pix = QPixmap(PICTURE_PNG)
-        return pix
+        return QPixmap(PICTURE_PNG)
 
     def apply_filters(self):
+        """Применяет поиск, фильтр по скидке и сортировку"""
         data = list(self.products)
 
         if self.is_manager_or_admin():
+            # Поиск по всем текстовым полям
             text = self.search_edit.text().strip().lower()
             if text:
                 def hit(row):
                     fields = [
-                        row.get("article"),
-                        row.get("name"),
-                        row.get("category_name"),
-                        row.get("description_text"),
-                        row.get("manufacturer_name"),
-                        row.get("supplier_name"),
-                        row.get("unit_name"),
+                        row.get("article"), row.get("name"), row.get("category_name"),
+                        row.get("description_text"), row.get("manufacturer_name"),
+                        row.get("supplier_name"), row.get("unit_name"),
                     ]
                     return any(text in str(v or "").lower() for v in fields)
                 data = [x for x in data if hit(x)]
 
+            # Фильтр по диапазону скидки
             discount_range = self.discount_combo.currentText()
             ranges = DataService.get_discount_ranges()
             for name, (low, high) in ranges:
@@ -1121,6 +1117,7 @@ class ProductsWindow(QMainWindow):
                         data = [x for x in data if low <= float(x.get("discount_percent", 0)) <= high]
                     break
 
+            # Сортировка
             sort_mode = self.sort_combo.currentText()
             if sort_mode == "Цена (по возрастанию)":
                 data.sort(key=lambda r: float(r.get("price") or 0))
@@ -1134,6 +1131,7 @@ class ProductsWindow(QMainWindow):
         self.fill_table(data)
 
     def fill_table(self, rows):
+        """Заполнение таблицы данными с применением стилей"""
         self.table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             pix = self.photo_pixmap(row.get("photo_file") or "")
@@ -1144,27 +1142,20 @@ class ProductsWindow(QMainWindow):
 
             price = Decimal(str(row.get("price") or 0))
             discount = Decimal(str(row.get("discount_percent") or 0))
-            final_price = (price * (Decimal("100") - discount) / Decimal("100")).quantize(Decimal("0.01"))
+            final_price = (price * (100 - discount) / 100).quantize(Decimal("0.01"))
 
             values = [
-                row.get("article") or "",
-                row.get("name") or "",
-                row.get("category_name") or "",
-                row.get("description_text") or "",
-                row.get("manufacturer_name") or "",
-                row.get("supplier_name") or "",
-                f"{price:.2f}",
-                f"{final_price:.2f}",
-                row.get("unit_name") or "",
-                str(row.get("stock_quantity") or 0),
-                f"{discount:.2f}",
+                row.get("article") or "", row.get("name") or "", row.get("category_name") or "",
+                row.get("description_text") or "", row.get("manufacturer_name") or "",
+                row.get("supplier_name") or "", f"{price:.2f}", f"{final_price:.2f}",
+                row.get("unit_name") or "", str(row.get("stock_quantity") or 0), f"{discount:.2f}",
             ]
             for c, v in enumerate(values, start=1):
-                item = QTableWidgetItem(v)
-                self.table.setItem(i, c, item)
+                self.table.setItem(i, c, QTableWidgetItem(v))
 
             self.table.item(i, 1).setData(Qt.ItemDataRole.UserRole, row["product_id"])
 
+            # Перечеркивание и красный цвет при скидке
             price_item = self.table.item(i, 7)
             if discount > 0:
                 f = price_item.font()
@@ -1172,18 +1163,17 @@ class ProductsWindow(QMainWindow):
                 price_item.setFont(f)
                 price_item.setForeground(QColor("red"))
 
+            # Подсветка строки
             bg_color = QColor(COLOR_WHITE)
-            fg_color = QColor("#111827")
             if int(row.get("stock_quantity") or 0) == 0:
-                bg_color = QColor(COLOR_ZERO_STOCK)
+                bg_color = QColor(COLOR_ZERO_STOCK)      # серый - нет на складе
             elif discount > 25:
-                bg_color = QColor(COLOR_DISCOUNT_ROW)
+                bg_color = QColor(COLOR_DISCOUNT_ROW)    # голубой - скидка >25%
 
             for col in range(1, self.table.columnCount()):
                 cell = self.table.item(i, col)
                 if cell:
                     cell.setBackground(bg_color)
-                    cell.setForeground(fg_color)
 
         self.table.resizeColumnsToContents()
         self.table.setColumnWidth(0, 100)
@@ -1238,6 +1228,7 @@ class ProductsWindow(QMainWindow):
         if not product_id:
             show_warn(self, "Выберите товар для удаления.")
             return
+        # Запрет удаления товара, который есть в заказах
         if DataService.product_exists_in_orders(product_id):
             show_warn(self, "Товар присутствует в заказе. Удаление невозможно.")
             return

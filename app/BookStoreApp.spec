@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('..\\resources', 'resources')]
+datas = [('..\\resources', 'resources'), ('..\\resources\\photos', 'resources\\photos')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('mysql.connector')
